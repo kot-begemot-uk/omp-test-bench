@@ -8,16 +8,17 @@
 #include <float.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <time.h>
 #include <omp.h>
 #include <sys/socket.h>
+#include <errno.h>
 #include <sys/un.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <math.h>
 #include <fcntl.h>
-#include <errno.h>
-#include <unistd.h>
+#include <stdatomic.h>
 
 #define TEST_SIZE 256
 #define VECTOR_SIZE 2048000
@@ -28,6 +29,7 @@ static void* (*m_b)[TEST_SIZE];
 static void* (*m_c)[TEST_SIZE];
 
 static void *mmap_address;
+static int num_threads;
 
 float *init_vector(float *vector)
 {
@@ -131,7 +133,7 @@ void compute_master(int sock)
 {
     int count;
     unsigned long stride = 1;
-    double start;
+    double start, duration;
     char *buffer;
     struct rusage rstart, rfinish;
 
@@ -150,9 +152,9 @@ void compute_master(int sock)
     }
     getrusage(RUSAGE_SELF, &rfinish);
 
+    duration = get_time() - start;
 
-
-    snprintf(buffer, 256, "omp efficiency is %f\n", 1/(total_cpu(&rstart, &rfinish)/((get_time() - start) * omp_get_num_threads())));
+    snprintf(buffer, 256, "duration %f, omp efficiency is %f\n", duration, omp_get_num_threads(), total_cpu(&rstart, &rfinish)/(duration * num_threads));
     if (sock > 0) {
         send(sock, &stride, sizeof(int), 0);
     } else {
@@ -167,16 +169,11 @@ int main(int argc, char *argv[])
     int sock = -1;
     struct sockaddr_un sock_data;
 
-    if (argc < 2) {
+    if (argc < 3) {
         exit(1);
     }
-
-    if (argc == 3) {
-        sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-        sock_data.sun_family = AF_UNIX;
-        strncpy((char *)&sock_data.sun_path, argv[1], 107);
-        connect(sock, (struct sockaddr *)&sock_data, sizeof(struct sockaddr_un));
-    }
+    num_threads = strtol(argv[2], NULL, 10);
+    omp_set_num_threads(num_threads);
     setup_test(argv[1]);
     compute_master(sock);
 }
